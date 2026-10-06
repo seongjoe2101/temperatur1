@@ -29,11 +29,8 @@ except Exception as e:
     st.stop()
 
 # Data preprocessing
-# Columns expected: 날짜, 지점, 평균기온, 최저기온, 최고기온
 df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
 df['연도'] = df['날짜'].dt.year
-df['월'] = df['날짜'].dt.month
-df['일'] = df['날짜'].dt.day
 
 # Filter data up to 2025 as per instructions
 df = df[df['연도'] <= 2025]
@@ -54,12 +51,25 @@ if reg_data.empty:
     st.warning("회귀 분석을 위한 충분한 데이터가 없습니다 (1908년 이후 관측일수 300일 이상인 해가 없음).")
     st.stop()
 
-# Independent variable: elapsed years since 1908 (e.g., 1908 -> 0, 1909 -> 1, ...)
+# Independent variable: elapsed years since 1908
 reg_data['지난연수'] = reg_data['연도'] - 1908
 
-# Calculate linear regression coefficients using numpy (polyfit degree 1)
-# y = slope * 지난연수 + intercept
-slope, intercept = np.polyfit(reg_data['지난연수'], reg_data['연평균기온'], 1)
+# Calculate overall linear regression coefficients (slope per 1 year)
+slope_all, intercept_all = np.polyfit(reg_data['지난연수'], reg_data['연평균기온'], 1)
+# Convert to "temperature increase per 100 years"
+increase_100_all = slope_all * 100
+
+# Calculate recent 20 years regression (e.g., max year 2025 back to 2006)
+max_reg_year = int(reg_data['연도'].max())
+recent_start_year = max_reg_year - 19 # 20 years span (e.g., 2006 ~ 2025)
+recent_data = reg_data[reg_data['연도'] >= recent_start_year].copy()
+
+if not recent_data.empty and len(recent_data) > 1:
+    recent_data['최근지난연수'] = recent_data['연도'] - recent_data['연도'].min()
+    slope_recent, _ = np.polyfit(recent_data['최근지난연수'], recent_data['연평균기온'], 1)
+    increase_100_recent = slope_recent * 100
+else:
+    increase_100_recent = 0.0
 
 # Calculate correlation coefficient (Pearson) between '연도' and '연평균기온'
 correlation = reg_data['연도'].corr(reg_data['연평균기온'])
@@ -77,8 +87,35 @@ col_m2.metric("시작 연도", f"{start_year}년")
 col_m3.metric("끝 연도", f"{end_year}년")
 col_m4.metric("상관계수 (연도 vs 기온)", f"{correlation:.4f}")
 
+# Display 100-year temperature increase prominently
+st.markdown("---")
+st.subheader("📈 100년당 기온 상승 추세 비교")
+col_c1, col_c2 = st.columns(2)
+
+with col_c1:
+    st.markdown(
+        f"""
+        <div style="padding: 20px; border-radius: 10px; background-color: #f0f2f6; text-align: center; border: 2px solid #1f77b4;">
+            <h4 style="margin: 0; color: #31333F;">전체 기간 ({start_year}~{end_year}년)</h4>
+            <h2 style="margin: 10px 0 0 0; color: #1f77b4; font-size: 36px;">+ {increase_100_all:.2f} °C / 100년</h2>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+with col_c2:
+    st.markdown(
+        f"""
+        <div style="padding: 20px; border-radius: 10px; background-color: #f0f2f6; text-align: center; border: 2px solid #ff7f0e;">
+            <h4 style="margin: 0; color: #31333F;">최근 20년 ({int(recent_data['연도'].min())}~{end_year}년)</h4>
+            <h2 style="margin: 10px 0 0 0; color: #ff7f0e; font-size: 36px;">+ {increase_100_recent:.2f} °C / 100년</h2>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # Generate regression line values for plotting
-reg_data['회귀예측기온'] = slope * reg_data['지난연수'] + intercept
+reg_data['회귀예측기온'] = slope_all * reg_data['지난연수'] + intercept_all
 
 # Plotly Scatter Plot with Regression Line
 fig = px.scatter(
@@ -117,7 +154,7 @@ selected_year = st.slider("조회/예측할 연도를 선택하세요", min_valu
 
 # Calculate prediction for selected year using the formula based on 1908
 selected_elapsed = selected_year - 1908
-predicted_temp = slope * selected_elapsed + intercept
+predicted_temp = slope_all * selected_elapsed + intercept_all
 
 # Display big result
 st.markdown(
